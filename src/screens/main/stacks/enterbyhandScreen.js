@@ -29,10 +29,8 @@ const EnterbyhandScreen = () => {
     
 
     return (
-            <ImageBackground
-                    source={require('../../../image/imgae.png')}
-                    style={styles.container}
-                    resizeMode="cover"
+             <View
+                  style={styles.container}
                 >
             <HeaderComponent
                 title="Gửi tin nhắn"
@@ -63,7 +61,7 @@ const EnterbyhandScreen = () => {
                 color="#007bff"
                 widthPercentage={90}
             />
-        </ImageBackground>
+        </View>
     );
 };
 

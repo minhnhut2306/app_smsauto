@@ -77,7 +77,6 @@ const SmsScreens = () => {
       console.error('Lỗi khi xóa AsyncStorage:', error);
     }
   };
-x
 
   const resetLocalState = () => {
     setSelected('');
@@ -260,10 +259,8 @@ x
   };
 
   return (
-    <ImageBackground
-      source={require('../../../image/imgae.png')}
+    <View
       style={styles.container}
-      resizeMode="cover"
     >
       <ScrollView showsVerticalScrollIndicator={false}>
         <HeaderComponent title="Auto SMS" onRefresh={handleRefresh} refreshText="" />
@@ -306,7 +303,7 @@ x
 
         </View>
       </ScrollView>
-    </ImageBackground>
+    </View>
   );
 };
 

@@ -18,13 +18,35 @@ const ButtonList = ({ selectedSim, options }) => {
   const timeInSeconds = useSelector(state => state.time) || 60;
   const time = parseInt(timeInSeconds?.timeInSeconds || 0, 10);
   const smsLimit = useSelector(state => state.limitsms.limitsms || 50);
-  const toggleSwitch = () => setIsEnabled(prevState => !prevState);
-  const toggleSwitchAlternating = () => {
+
+  const toggleSwitch = async () => {
+    if (isSending) {
+      Alert.alert("Bạn cần dừng gửi tin nhắn trước khi bật/tắt chế độ giới hạn sms!");
+      return;
+    }
+    setIsEnabled(prevState => {
+      const newState = !prevState;
+      if (!newState) {
+        setSmsLimitInput('');
+        dispatch(setlimit(50));
+      }
+      // Save the new state to AsyncStorage
+      AsyncStorage.setItem('isEnabled', JSON.stringify(newState));
+      return newState;
+    });
+  }
+
+  const toggleSwitchAlternating = async () => {
     if (isSending) {
       Alert.alert("Bạn cần dừng gửi tin nhắn trước khi bật/tắt chế độ xen kẽ!");
       return;
     }
-    setIsEnabledAlternating(prevState => !prevState);
+    setIsEnabledAlternating(prevState => {
+      const newState = !prevState;
+      // Save the new state to AsyncStorage
+      AsyncStorage.setItem('isEnabledAlternating', JSON.stringify(newState));
+      return newState;
+    });
   };
 
   // React state hooks
@@ -38,9 +60,9 @@ const ButtonList = ({ selectedSim, options }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [lastSentName, setLastSentName] = useState(null);
   const [countdown, setCountdown] = useState(0);
+  const [smsCount, setSmsCount] = useState(0);
 
   // Refs
-  const smsCountRef = useRef(0);
   const sentPhones = useRef(new Set());
   const isSendingRef = useRef(false);
 
@@ -88,7 +110,6 @@ const ButtonList = ({ selectedSim, options }) => {
     return () => clearInterval(timer);
   }, [countdown]);
 
-
   const saveCurrentIndex = async (sim, index) => {
     try {
       await AsyncStorage.setItem(`currentIndex_${sim}`, index.toString());
@@ -131,7 +152,16 @@ const ButtonList = ({ selectedSim, options }) => {
       console.log(`(LOG) Đang gửi tin nhắn tới ${phone.phone}: ${message} qua SIM ${sim + 1}`);
       await sendSms(phone.phone, message, sim);
       console.log('(SUCCESS) Tin nhắn đã được gửi:', phone.phone);
-      smsCountRef.current += 1;
+      setSmsCount(prevCount => {
+        const newCount = prevCount + 1;
+        console.log(`Updated SMS count: ${newCount}`);
+        if (newCount >= smsLimit) {
+          Alert.alert('Đã đạt giới hạn tin nhắn!');
+          setIsSending(false);
+          isSendingRef.current = false;
+        }
+        return newCount;
+      });
       setLastSentName(phone.TEN);
     } catch (error) {
       console.error(`(ERROR) Lỗi gửi tin nhắn tới ${phone.phone}:`, error);
@@ -156,7 +186,7 @@ const ButtonList = ({ selectedSim, options }) => {
 
     setIsSending(true);
     isSendingRef.current = true;
-    smsCountRef.current = 0;
+    setSmsCount(0);
 
     try {
       const phones = selectedOption.phones;
@@ -166,7 +196,8 @@ const ButtonList = ({ selectedSim, options }) => {
       let currentSim = 0;
 
       for (let i = savedIndex; i < phones.length; i++) {
-        if (isEnabled && smsCountRef.current >= smsLimit) {
+        console.log(`Checking SMS limit: ${smsCount} / ${smsLimit}`);
+        if (isEnabled && smsCount >= smsLimit) {
           Alert.alert('Đã đạt giới hạn tin nhắn!');
           break;
         }
@@ -191,8 +222,8 @@ const ButtonList = ({ selectedSim, options }) => {
         setCurrentIndex(i + 1);
         await saveCurrentIndex(selectedSim, i + 1);
         setCountdown(time);
-        console.log(`Đã gửi ${smsCountRef.current} tin nhắn`);
-        if (smsCountRef.current >= smsLimit) {
+        console.log(`Đã gửi ${smsCount + 1} tin nhắn`);
+        if (smsCount + 1 >= smsLimit) {
           Alert.alert('Đã đạt giới hạn tin nhắn!');
           break;
         }
@@ -201,8 +232,8 @@ const ButtonList = ({ selectedSim, options }) => {
           currentSim = currentSim === 0 ? 1 : 0;
         }
       }
-      console.log(`Tổng số tin nhắn đã gửi: ${smsCountRef.current}`);
-      if (smsCountRef.current >= smsLimit) {
+      console.log(`Tổng số tin nhắn đã gửi: ${smsCount}`);
+      if (smsCount >= smsLimit) {
         Alert.alert('Hoàn thành gửi tin nhắn!');
       }
     } catch (error) {
@@ -213,34 +244,87 @@ const ButtonList = ({ selectedSim, options }) => {
     }
   };
 
-
   const handleStop = async () => {
     setIsSending(false);
     isSendingRef.current = false;
     setCountdown(0);
 
     if (lastSentName) {
-      Alert.alert(`Đã dừng gửi tin nhắn. Tin nhắn cuối cùng đã được gửi tới người dùng: ${lastSentName}`);
+      Alert.alert(`Đã dừng gửi tin nhắn ở ${lastSentName}`);
     } else {
       Alert.alert('Đã dừng gửi tin nhắn!');
     }
 
     await saveCurrentIndex(selectedSim, currentIndex);
   };
-  const handleSaveTime = () => {
+
+  const handleSaveTime = async () => {
     dispatch(setTime(minutes));
     setModalVisible(false);
+    await AsyncStorage.setItem('timeInSeconds', minutes);
   };
 
-  const handlelimitsms = () => {
+  const handleRefresh = async () => {
+    try {
+      await AsyncStorage.clear();
+      dispatch(setlimit(50));
+      dispatch(setTime(60));
+      setIsEnabled(false);
+      setIsEnabledAlternating(false);
+      setSmsCount(0);
+      Alert.alert('Dữ liệu đã được làm mới!');
+    } catch (error) {
+      console.error('Lỗi khi làm mới dữ liệu:', error);
+      Alert.alert('Lỗi khi làm mới dữ liệu, vui lòng thử lại!');
+    }
+  };
+
+  const handlelimitsms = async () => {
     if (smsLimitInput && !isNaN(smsLimitInput)) {
-      dispatch(setlimit(smsLimitInput));
-      setLimitsms(false);
-      Alert.alert(`Giới hạn tin nhắn đã được đặt thành ${smsLimitInput}`);
+      try {
+        if (isSending) {
+          Alert.alert('Đang gửi tin nhắn! Hãy dừng trước khi thay đổi giới hạn.');
+          return;
+        }
+        await AsyncStorage.setItem('smsLimit', smsLimitInput.toString());
+        dispatch(setlimit(parseInt(smsLimitInput, 10)));
+        setLimitsms(false);
+        Alert.alert(`Giới hạn tin nhắn đã được đặt thành ${smsLimitInput}`);
+      } catch (error) {
+        console.error('Lỗi khi lưu giới hạn SMS:', error);
+        Alert.alert('Lỗi khi lưu dữ liệu, vui lòng thử lại!');
+      }
     } else {
       Alert.alert('Vui lòng nhập giới hạn hợp lệ!');
     }
   };
+
+  useEffect(() => {
+    const getStoredSettings = async () => {
+      try {
+        const storedLimit = await AsyncStorage.getItem('smsLimit');
+        if (storedLimit) {
+          dispatch(setlimit(parseInt(storedLimit, 10)));
+        }
+        const storedTime = await AsyncStorage.getItem('timeInSeconds');
+        if (storedTime) {
+          dispatch(setTime(storedTime));
+        }
+        const storedSwitch = await AsyncStorage.getItem('isEnabled');
+        if (storedSwitch !== null) {
+          setIsEnabled(JSON.parse(storedSwitch));
+        }
+        const storedSwitchAlternating = await AsyncStorage.getItem('isEnabledAlternating');
+        if (storedSwitchAlternating !== null) {
+          setIsEnabledAlternating(JSON.parse(storedSwitchAlternating));
+        }
+      } catch (error) {
+        console.error('Lỗi khi lấy dữ liệu từ AsyncStorage:', error);
+      }
+    };
+
+    getStoredSettings();
+  }, []);
 
   const handleShowList = () => {
     if (!selectedSim) {
@@ -249,7 +333,6 @@ const ButtonList = ({ selectedSim, options }) => {
     }
     navigation.navigate('ShowList', { simType: selectedSim });
   };
-
   const buttons = [
     {
       title: 'Cài đặt nội dung',
@@ -278,7 +361,12 @@ const ButtonList = ({ selectedSim, options }) => {
       textColor: COLORS.red,
       onPress: handleStop,
     },
-
+    {
+      title: 'Làm mới lại trạng thái dữ liệu',
+      color: COLORS.red,
+      textColor: '#fff',
+      onPress: handleRefresh,
+    },
   ];
 
   return (
@@ -310,7 +398,7 @@ const ButtonList = ({ selectedSim, options }) => {
         />
         {isEnabled && (
           <View style={styles.switchContainer}>
-            <Text style={styles.smsLimitText}>{smsCountRef.current} / {smsLimit} SMS</Text>
+            <Text style={styles.smsLimitText}>{smsCount} / {smsLimit} SMS</Text>
             <ButtonComponent
               title="Nhập"
               color={COLORS.red}
@@ -410,7 +498,6 @@ const ButtonList = ({ selectedSim, options }) => {
               onPress={handlelimitsms}
               color={COLORS.red}
               textColor={COLORS.white}
-
             />
             <TouchableOpacity
               style={{

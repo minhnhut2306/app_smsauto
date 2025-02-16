@@ -120,11 +120,9 @@ const ContentSettingsScreen = ({ route }) => {
     };
 
     return (
-        <ImageBackground
-            source={require('../../../image/imgae.png')}
-            style={styles.container}
-            resizeMode="cover"
-        >
+        <View
+             style={styles.container}
+           >
             <HeaderComponent
                 title="Cài đặt nội dung"
                 refreshText="Chọn mẫu"
@@ -228,7 +226,7 @@ const ContentSettingsScreen = ({ route }) => {
                     {replaceContentWithValues(temporaryContent, randomItem)}
                 </Text>
             )}
-        </ImageBackground>
+        </View>
     );
 };
 

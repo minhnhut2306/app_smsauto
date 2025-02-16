@@ -57,15 +57,13 @@ const ShowlistScreen = ({ route }) => {
     };
 
     return (
-        <ImageBackground
-        source={require('../../../image/imgae.png')}
-        style={styles.container}
-        resizeMode="cover"
-    >
+        <View
+            style={styles.container}
+        >
             <HeaderComponent title="Hiển thị danh sách" onRefresh={() => { }} refreshText="" />
             {phoneList.length > 0 ? (
                 <FlatList
-                showsVerticalScrollIndicator={false}
+                    showsVerticalScrollIndicator={false}
                     data={phoneList}
                     keyExtractor={(item, index) => index.toString()}
                     renderItem={({ item, index }) => (
@@ -74,7 +72,7 @@ const ShowlistScreen = ({ route }) => {
                             onPress={() => handlePhoneClick(item.PHONE)}
                         >
                             <Text style={styles.phoneText}>
-                            <Text>{index + 1}. {item.PHONE ? 0 + item.PHONE : ''} - {item.TEN}</Text>
+                                <Text>{index + 1}. {item.PHONE ? 0 + item.PHONE : ''} - {item.TEN}</Text>
                             </Text>
                         </TouchableOpacity>
                     )}
@@ -82,7 +80,7 @@ const ShowlistScreen = ({ route }) => {
             ) : (
                 <Text style={styles.noDataText}>Không có dữ liệu để hiển thị</Text>
             )}
-        </ImageBackground>
+        </View>
     );
 };
 
