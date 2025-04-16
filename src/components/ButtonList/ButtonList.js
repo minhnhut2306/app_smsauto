@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Modal, Text, TextInput, TouchableOpacity, PermissionsAndroid, Switch, StyleSheet, Alert } from 'react-native';
+import { View, Modal, Text, TextInput, TouchableOpacity, PermissionsAndroid, Switch, StyleSheet, Alert, AppState } from 'react-native';
 import COLORS from '../../constants/colors';
 import { useNavigation } from '@react-navigation/native';
 import ButtonComponent from '../Buttoncomponent/Buttoncomponenrt';
@@ -9,6 +9,28 @@ import fontsize from '../../constants/fontsize';
 import { setlimit } from '../../redux/reducers/limitsmsReducer';
 import { sendSms } from '../../redux/server/smsService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import BackgroundService from 'react-native-background-actions';
+
+// Thêm options cho background task
+const backgroundOptions = {
+  taskName: 'SMS Sender',
+  taskTitle: 'Đang gửi tin nhắn',
+  taskDesc: 'Ứng dụng đang gửi tin nhắn trong nền',
+  taskIcon: {
+    name: 'ic_launcher',
+    type: 'mipmap',
+  },
+  color: '#ff00ff',
+  linkingURI: 'yourScheme://chat/jane', // Deep linking
+  parameters: {
+    delay: 100,
+  },
+  options: {
+    stopOnTerminate: false,
+    startOnBoot: true,
+    forceAlarmManager: true
+  }
+};
 
 const ButtonList = ({ selectedSim, options }) => {
   // Redux state selectors
@@ -65,6 +87,8 @@ const ButtonList = ({ selectedSim, options }) => {
   // Refs
   const sentPhones = useRef(new Set());
   const isSendingRef = useRef(false);
+  const appState = useRef(AppState.currentState);
+  const [appStateVisible, setAppStateVisible] = useState(appState.current);
 
   // Other hooks
   const navigation = useNavigation();
@@ -99,13 +123,17 @@ const ButtonList = ({ selectedSim, options }) => {
   useEffect(() => {
     let timer;
     if (countdown > 0) {
+      console.log(`[${new Date().toISOString()}] Countdown: ${countdown}s`);
       timer = setInterval(() => {
-        setCountdown(prev => prev - 1);
+        setCountdown(prev => {
+          console.log(`[${new Date().toISOString()}] Countdown update: ${prev - 1}s`);
+          return prev - 1;
+        });
       }, 1000);
     } else if (countdown === 0) {
+      console.log(`[${new Date().toISOString()}] Countdown kết thúc`);
       setIsSending(false);
       isSendingRef.current = false;
-      console.log("Bộ đếm đã dừng.");
     }
     return () => clearInterval(timer);
   }, [countdown]);
@@ -129,6 +157,7 @@ const ButtonList = ({ selectedSim, options }) => {
   };
 
   const sendMessage = async (phone, sim) => {
+    const startTime = new Date();
     try {
       let message = sms;
       message = message.replace("{CMND}", phone.CMND);
@@ -149,13 +178,20 @@ const ButtonList = ({ selectedSim, options }) => {
         return;
       }
 
-      console.log(`(LOG) Đang gửi tin nhắn tới ${phone.phone}: ${message} qua SIM ${sim + 1}`);
+      console.log(`[${startTime.toISOString()}] Bắt đầu gửi tin nhắn tới ${phone.phone} (${phone.TEN})`);
       await sendSms(phone.phone, message, sim);
-      console.log('(SUCCESS) Tin nhắn đã được gửi:', phone.phone);
+      
+      const endTime = new Date();
+      const duration = (endTime - startTime) / 1000; // Chuyển đổi thành giây
+      
+      console.log(`[${endTime.toISOString()}] Gửi tin nhắn thành công tới ${phone.phone}`);
+      console.log(`Thời gian gửi: ${duration.toFixed(2)} giây`);
+      
       setSmsCount(prevCount => {
         const newCount = prevCount + 1;
-        console.log(`Updated SMS count: ${newCount}`);
+        console.log(`Tổng số tin nhắn đã gửi: ${newCount}/${smsLimit}`);
         if (newCount >= smsLimit) {
+          console.log('Đã đạt giới hạn tin nhắn');
           Alert.alert('Đã đạt giới hạn tin nhắn!');
           setIsSending(false);
           isSendingRef.current = false;
@@ -164,8 +200,25 @@ const ButtonList = ({ selectedSim, options }) => {
       });
       setLastSentName(phone.TEN);
     } catch (error) {
-      console.error(`(ERROR) Lỗi gửi tin nhắn tới ${phone.phone}:`, error);
+      const endTime = new Date();
+      const duration = (endTime - startTime) / 1000;
+      console.error(`[${endTime.toISOString()}] Lỗi gửi tin nhắn tới ${phone.phone} sau ${duration.toFixed(2)} giây:`, error);
     }
+  };
+
+  // Thêm hàm background task
+  const backgroundTask = async () => {
+    // Prevent app from being killed in background
+    await new Promise(async (resolve) => {
+      // Keep track of whether we need to continue running
+      while (isSendingRef.current) {
+        // Log to show task is still running
+        console.log('Background task still running...');
+        // Use shorter interval to prevent task from being killed
+        await new Promise(r => setTimeout(r, 100));
+      }
+      resolve();
+    });
   };
 
   const handleStartSending = async () => {
@@ -184,63 +237,77 @@ const ButtonList = ({ selectedSim, options }) => {
       return;
     }
 
-    setIsSending(true);
-    isSendingRef.current = true;
-    setSmsCount(0);
-
     try {
+      const startTime = new Date();
+      console.log(`[${startTime.toISOString()}] Bắt đầu phiên gửi tin nhắn`);
+      
+      await BackgroundService.start(backgroundTask, backgroundOptions);
+      
+      setIsSending(true);
+      isSendingRef.current = true;
+      setSmsCount(0);
+
       const phones = selectedOption.phones;
       const savedIndex = await getCurrentIndex(selectedSim);
       setCurrentIndex(savedIndex);
       sentPhones.current.clear();
       let currentSim = 0;
 
-      for (let i = savedIndex; i < phones.length; i++) {
-        console.log(`Checking SMS limit: ${smsCount} / ${smsLimit}`);
-        if (isEnabled && smsCount >= smsLimit) {
-          Alert.alert('Đã đạt giới hạn tin nhắn!');
-          break;
+      const sendWithDelay = async (index) => {
+        if (!isSendingRef.current || index >= phones.length || (isEnabled && smsCount >= smsLimit)) {
+          const endTime = new Date();
+          const totalDuration = (endTime - startTime) / 1000;
+          console.log(`[${endTime.toISOString()}] Kết thúc phiên gửi tin nhắn`);
+          console.log(`Tổng thời gian: ${totalDuration.toFixed(2)} giây`);
+          console.log(`Tổng tin nhắn đã gửi: ${smsCount}`);
+          
+          setIsSending(false);
+          isSendingRef.current = false;
+          await BackgroundService.stop();
+          if (smsCount >= smsLimit) {
+            Alert.alert('Đã đạt giới hạn tin nhắn!');
+          }
+          return;
         }
 
-        if (!isSendingRef.current) {
-          console.log("Gửi tin nhắn đã bị dừng!");
-          break;
-        }
-
-        const phone = phones[i];
+        const phone = phones[index];
         if (sentPhones.current.has(phone.phone)) {
-          console.log(`Số điện thoại ${phone.phone} đã gửi rồi, bỏ qua.`);
-          continue;
+          console.log(`Bỏ qua số ${phone.phone} (đã gửi trước đó)`);
+          sendWithDelay(index + 1);
+          return;
         }
 
-        await sendMessage(phone, currentSim);
-        if (!isSendingRef.current) {
-          console.log("Quá trình gửi đã bị dừng, thoát khỏi vòng lặp.");
-          break;
+        try {
+          await sendMessage(phone, currentSim);
+          if (!isSendingRef.current) {
+            await BackgroundService.stop();
+            return;
+          }
+
+          sentPhones.current.add(phone.phone);
+          setCurrentIndex(index + 1);
+          await saveCurrentIndex(selectedSim, index + 1);
+          setCountdown(time);
+
+          if (isEnabledAlternating) {
+            currentSim = currentSim === 0 ? 1 : 0;
+            console.log(`Chuyển sang SIM ${currentSim + 1}`);
+          }
+
+          console.log(`Chờ ${time} giây trước khi gửi tin nhắn tiếp theo...`);
+          await new Promise(resolve => setTimeout(resolve, time * 1000));
+          sendWithDelay(index + 1);
+        } catch (error) {
+          console.error('Lỗi khi gửi tin nhắn:', error);
+          sendWithDelay(index + 1);
         }
-        sentPhones.current.add(phone.phone);
-        setCurrentIndex(i + 1);
-        await saveCurrentIndex(selectedSim, i + 1);
-        setCountdown(time);
-        console.log(`Đã gửi ${smsCount + 1} tin nhắn`);
-        if (smsCount + 1 >= smsLimit) {
-          Alert.alert('Đã đạt giới hạn tin nhắn!');
-          break;
-        }
-        await new Promise(resolve => setTimeout(resolve, time * 1000));
-        if (isEnabledAlternating) {
-          currentSim = currentSim === 0 ? 1 : 0;
-        }
-      }
-      console.log(`Tổng số tin nhắn đã gửi: ${smsCount}`);
-      if (smsCount >= smsLimit) {
-        Alert.alert('Hoàn thành gửi tin nhắn!');
-      }
+      };
+
+      sendWithDelay(savedIndex);
+
     } catch (error) {
-      console.error('Lỗi khi gửi tin nhắn:', error);
-    } finally {
-      setIsSending(false);
-      isSendingRef.current = false;
+      console.error('Lỗi khi bắt đầu gửi tin nhắn:', error);
+      await BackgroundService.stop();
     }
   };
 
@@ -248,6 +315,7 @@ const ButtonList = ({ selectedSim, options }) => {
     setIsSending(false);
     isSendingRef.current = false;
     setCountdown(0);
+    await BackgroundService.stop();
 
     if (lastSentName) {
       Alert.alert(`Đã dừng gửi tin nhắn ở ${lastSentName}`);
@@ -333,6 +401,46 @@ const ButtonList = ({ selectedSim, options }) => {
     }
     navigation.navigate('ShowList', { simType: selectedSim });
   };
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      console.log('App State changed from:', appState.current, 'to:', nextAppState);
+      
+      if (appState.current.match(/active|inactive/) && nextAppState === 'background') {
+        console.log('App đã chuyển sang chế độ nền');
+        if (isSendingRef.current) {
+          console.log('Tiếp tục gửi tin nhắn trong nền');
+          BackgroundService.updateNotification({
+            taskDesc: 'Đang gửi tin nhắn trong nền...'
+          });
+        }
+      }
+
+      if (appState.current === 'background' && nextAppState === 'active') {
+        console.log('App đã trở lại từ chế độ nền');
+        if (isSendingRef.current) {
+          console.log('Tiếp tục gửi tin nhắn...');
+        }
+      }
+
+      appState.current = nextAppState;
+      setAppStateVisible(nextAppState);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      // Cleanup khi component unmount
+      if (isSendingRef.current) {
+        BackgroundService.stop();
+      }
+    };
+  }, []);
+
   const buttons = [
     {
       title: 'Cài đặt nội dung',
